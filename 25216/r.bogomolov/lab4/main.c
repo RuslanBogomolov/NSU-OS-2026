@@ -28,6 +28,26 @@ int main() {
 
         strcpy(str, buffer);
 
+        while (len > 0 && str[len - 1] != '\n') {
+            if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+                break;
+            }
+
+            size_t part_len = strlen(buffer);
+
+            char *tmp = realloc(str, len + part_len + 1);
+            if (tmp == NULL) {
+                perror("realloc");
+                free(str);
+                return 1;
+            }
+
+            str = tmp;
+
+            strcpy(str + len, buffer);
+            len += part_len;
+        }
+
         struct Node *node = malloc(sizeof(struct Node));
         if (node == NULL) {
             perror("malloc");
