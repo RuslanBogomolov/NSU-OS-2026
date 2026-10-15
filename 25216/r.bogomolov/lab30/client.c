@@ -3,7 +3,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define SOCKET_PATH "unix_socket"
