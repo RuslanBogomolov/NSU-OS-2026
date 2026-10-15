@@ -25,7 +25,8 @@ int main(void) {
 
     address.sun_family = AF_UNIX;
     strcpy(address.sun_path, SOCKET_PATH);
-
+    
+    unlink(SOCKET_PATH);
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == -1) {
         perror("bind");
         close(server_fd);
