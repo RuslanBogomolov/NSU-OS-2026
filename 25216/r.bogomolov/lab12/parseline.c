@@ -3,73 +3,141 @@
 #include <string.h>
 #include "shell.h"
 
-static char *nextword(char **line, char **buffer) {
+enum token {
+    END, WORD, INPUT, OUTPUT, APPEND, SEMICOLON, BACKGROUND, PIPE, ERROR
+};
 
-    while (isspace((unsigned char)**line)) {
-        (*line)++;
+static int put_char(char **buffer, char *end, char ch) {
+    if (*buffer == end) {
+        return -1;
+    }
+    *(*buffer)++ = ch;
+    return 0;
+}
+
+static enum token nextword(char **line, char **buffer, char *end, char **word, const char **error) {
+    char *p = *line;
+
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    *line = p;
+    if (*p == '\0') {
+        return END;
     }
 
-    if (**line == '\0') {
-        return NULL;
+    if (strchr("<>;&|", *p)) {
+        char op = *p++;
+        if ((op == '&' || op == '|') && *p == op) {
+            *error = "Операторы && и || пока не поддерживаются";
+            return ERROR;
+        }
+        *line = p;
+        switch (op) {
+        case '<': return INPUT;
+        case '>':
+            if (*p == '>') {
+                *line = p + 1;
+                return APPEND;
+            }
+            return OUTPUT;
+        case ';': return SEMICOLON;
+        case '&': return BACKGROUND;
+        default:  return PIPE;
+        }
     }
 
-    char *word = *buffer;
+    *word = *buffer;
+    char quote = '\0';
+    while (*p != '\0') {
+        char ch = *p;
 
-    if (strchr("<>;&|", **line)) {
-
-        char op = *(*line)++;
-        *(*buffer)++ = op;
-
-        if (op == '>' && **line == '>') {
-            *(*buffer)++ = *(*line)++;
+        if (quote == '\0') {
+            if (isspace((unsigned char)ch) || strchr("<>;&|", ch)) {
+                break;
+            }
+            if (ch == '\'' || ch == '"') {
+                quote = ch;
+                p++;
+                continue;
+            }
+        } else if (ch == quote) {
+            quote = '\0';
+            p++;
+            continue;
         }
 
-    } else {
-        while (**line && !isspace((unsigned char)**line) && !strchr("<>;&|", **line)) {
-            *(*buffer)++ = *(*line)++;
-        }
-    }
-    *(*buffer)++ = '\0';
+        if (ch == '\\' && quote != '\'') {
+            if (p[1] == '\0') {
+                *error = "Обратная косая черта в конце строки";
+                return ERROR;
+            }
 
-    return word;
+            if (quote == '\0' || strchr("$`\"\\", p[1])) {
+                ch = *++p;
+            }
+        }
+
+        if (put_char(buffer, end, ch) == -1) {
+            *error = "Переполнен буфер разбора";
+            return ERROR;
+        }
+        p++;
+    }
+
+    if (quote != '\0') {
+        *error = "Незакрытая кавычка";
+        return ERROR;
+    }
+    if (put_char(buffer, end, '\0') == -1) {
+        *error = "Переполнен буфер разбора";
+        return ERROR;
+    }
+    *line = p;
+    return WORD;
 }
 
 int parseline(char **line) {
-
     static char buffer[2 * MAX_LINE];
     char *p = buffer;
-    char *word;
+    char *word = NULL;
+    const char *error = "Ошибка синтаксиса или слишком много аргументов/команд";
+    enum token type;
     int i = 0;
 
     memset(cmds, 0, sizeof(cmds));
     bkgrnd = 0;
     infile = outfile = appfile = NULL;
 
-    while ((word = nextword(line, &p)) != NULL) {
-        if (strcmp(word, ";") == 0 || strcmp(word, "&") == 0) {
+    while ((type = nextword(line, &p, buffer + sizeof(buffer), &word, &error)) != END) {
+        if (type == ERROR) {
+            goto error;
+        }
+        if (type == SEMICOLON || type == BACKGROUND) {
             if (cmds[i].argc == 0) {
                 goto error;
             }
-
-            bkgrnd = strcmp(word, "&") == 0;
+            bkgrnd = type == BACKGROUND;
             return i + 1;
         }
 
-        if (strcmp(word, "|") == 0) {
+        if (type == PIPE) {
             if (cmds[i].argc == 0 || i == MAX_COMMANDS - 1) {
                 goto error;
             }
             i++;
-
-        } else if (strcmp(word, "<") == 0 || strcmp(word, ">") == 0 || strcmp(word, ">>") == 0) {
-
-            char *name = nextword(line, &p);
-
-            if (name == NULL || strchr("<>;&|", name[0])) {
+        } else if (type == INPUT || type == OUTPUT || type == APPEND) {
+            char *name = NULL;
+            enum token filename = nextword(line, &p, buffer + sizeof(buffer), &name, &error);
+            if (filename == ERROR) {
+                goto error;
+            }
+            if (filename != WORD) {
+                error = "После перенаправления требуется имя файла";
                 goto error;
             }
 
-            if (word[0] == '<') {
+            if (type == INPUT) {
                 if (infile != NULL) {
                     goto error;
                 }
@@ -78,13 +146,12 @@ int parseline(char **line) {
                 if (outfile != NULL || appfile != NULL) {
                     goto error;
                 }
-                if (word[1] == '>') {
+                if (type == APPEND) {
                     appfile = name;
                 } else {
                     outfile = name;
                 }
             }
-
         } else {
             if (cmds[i].argc == MAX_ARGS - 1) {
                 goto error;
@@ -93,13 +160,15 @@ int parseline(char **line) {
             cmds[i].cmdargs[cmds[i].argc] = NULL;
         }
     }
+
     if (cmds[i].argc != 0) {
         return i + 1;
     }
-    if (i == 0 && infile == NULL && outfile == NULL && appfile == NULL)
+    if (i == 0 && infile == NULL && outfile == NULL && appfile == NULL) {
         return 0;
+    }
 
 error:
-    fprintf(stderr, "Ошибка синтаксиса или слишком много аргументов/команд\n");
+    fprintf(stderr, "%s\n", error);
     return -1;
 }
