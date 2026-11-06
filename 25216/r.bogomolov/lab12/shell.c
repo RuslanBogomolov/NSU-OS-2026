@@ -18,11 +18,13 @@ int shell_interactive;
 volatile sig_atomic_t input_interrupted;
 
 struct process {
+    /* Нулевой pid означает, что завершение процесса уже учтено через waitpid. */
     pid_t pid;
     int stopped;
 };
 
 struct job {
+    /* Один конвейер образует задачу; в интерактивном режиме это группа процессов. */
     pid_t pgid;
     unsigned long id;
     int nproc;
@@ -47,6 +49,8 @@ static int set_signal(int sig, void (*handler)(int), int flags) {
 }
 
 static void signal_event(int sig) {
+    /* Обработчик только отмечает Ctrl+C; статусы детей собираются в основном коде.
+       Для SIGCHLD сам вызов обработчика прерывает ожидание в pselect. */
     if (sig == SIGINT) {
         input_interrupted = 1;
     }
@@ -58,6 +62,7 @@ static int init_shell(void) {
         if (set_signal(SIGTTIN, SIG_DFL, SA_RESTART) == -1) {
             return -1;
         }
+        /* Оболочка, запущенная в фоне, ждёт передачи ей терминала. */
         for (;;) {
             pid_t foreground = tcgetpgrp(STDIN_FILENO);
             if (foreground == -1) {
@@ -104,6 +109,7 @@ static int job_done(const struct job *job) {
 }
 
 static int job_stopped(const struct job *job) {
+    /* Задача остановлена, только когда остановлены все ещё живые процессы. */
     if (job_done(job)) {
         return 0;
     }
@@ -161,6 +167,7 @@ static void update_process(pid_t pid, int status) {
 }
 
 int collect_jobs(void) {
+    /* Неблокирующе забираем все доступные изменения состояния дочерних процессов. */
     for (;;) {
         int status;
         pid_t pid = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED);
@@ -236,6 +243,7 @@ static void cancel_job(struct job *job) {
 }
 
 static int give_terminal(struct job *job) {
+    /* Ctrl+C во время передачи терминала пересылается запускаемой задаче. */
     sigset_t blocked, previous, pending;
     sigemptyset(&blocked);
     sigaddset(&blocked, SIGINT);
@@ -281,6 +289,7 @@ static void foreground_job(struct job *job, int resume, int start_fd) {
         close(start_fd);
     }
 
+    /* waitpid может вернуть и фоновый процесс: обновляем общую таблицу задач. */
     int signaled = 0;
     while (!job_done(job) && !job_stopped(job)) {
         int status;
@@ -313,6 +322,7 @@ static void foreground_job(struct job *job, int resume, int start_fd) {
         job->pgid = 0;
     } else {
         number_job(job);
+        /* Остановленный передний конвейер автоматически продолжается в фоне. */
         if (continue_job(job) == 0) {
             fprintf(stderr, "[%lu] %ld\n", job->id, (long)job->pgid);
         }
@@ -387,6 +397,7 @@ static void launch_pipeline(int ncmd) {
 
     int pipes[MAX_COMMANDS - 1][2];
     int pipe_count = 0;
+    /* ready подтверждает настройку детей, start удерживает их до общего запуска. */
     int start[2];
     if (pipe(start) == -1) {
         perror("pipe");
@@ -447,6 +458,8 @@ static void launch_pipeline(int ncmd) {
             }
             close(ready[1]);
 
+            /* Родитель закроет start[1] после подготовки всей задачи.
+               EOF разрешает детям продолжить запуск, в том числе читать терминал. */
             char byte;
             ssize_t count;
             do {
@@ -463,6 +476,7 @@ static void launch_pipeline(int ncmd) {
                 perror("dup2: pipe");
                 _exit(1);
             }
+            /* Лишние копии концов каналов помешали бы читателям получить EOF. */
             close_pipes(pipes, pipe_count);
 
             if (i == 0) {
@@ -491,6 +505,7 @@ static void launch_pipeline(int ncmd) {
             job->pgid = pid;
         }
         job->processes[job->nproc++].pid = pid;
+        /* Группу задают и родитель, и ребёнок независимо от порядка их выполнения. */
         if (shell_interactive && setpgid(pid, job->pgid) == -1) {
             perror("setpgid");
             goto fail;
@@ -529,6 +544,8 @@ fail:
 }
 
 static struct job *select_job(const char *text) {
+    /* %N — номер задачи; число — прежде всего pgid, затем номер задачи.
+       Без аргумента выбирается задача с наибольшим номером. */
     unsigned long value = 0;
     int by_id = text != NULL && *text == '%';
     if (text != NULL) {
@@ -561,6 +578,7 @@ static struct job *select_job(const char *text) {
     return found;
 }
 
+/* 0 — внешняя команда, 1 — встроенная обработана, 2 — запрос выхода. */
 static int builtin(void) {
     const char *name = cmds[0].cmdargs[0];
     int list = strcmp(name, "jobs") == 0;

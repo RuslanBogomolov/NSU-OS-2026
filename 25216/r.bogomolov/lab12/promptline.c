@@ -13,6 +13,7 @@ static void prompt(void) {
 }
 
 static int read_character(char *ch) {
+    /* Блокировка закрывает промежуток между проверкой состояния и ожиданием. */
     sigset_t blocked, previous;
     sigemptyset(&blocked);
     sigaddset(&blocked, SIGINT);
@@ -33,6 +34,7 @@ static int read_character(char *ch) {
         fd_set input;
         FD_ZERO(&input);
         FD_SET(STDIN_FILENO, &input);
+        /* pselect атомарно возвращает прежнюю маску на время ожидания ввода. */
         int ready = pselect(STDIN_FILENO + 1, &input, NULL, NULL, NULL, &previous);
         if (ready == -1 && errno == EINTR) {
             continue;
@@ -90,6 +92,7 @@ int prompline(char *line, int size) {
         if (used < size - 1) {
             line[used++] = ch;
         } else {
+            /* Дочитываем длинную строку до конца, чтобы её хвост не стал командой. */
             too_long = 1;
         }
     }

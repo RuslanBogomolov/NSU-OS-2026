@@ -15,6 +15,7 @@ static int put_char(char **buffer, char *end, char ch) {
     return 0;
 }
 
+/* Слова копируются в отдельный буфер без кавычек и экранирующих символов. */
 static enum token nextword(char **line, char **buffer, char *end, char **word, const char **error) {
     char *p = *line;
 
@@ -67,12 +68,14 @@ static enum token nextword(char **line, char **buffer, char *end, char **word, c
             continue;
         }
 
+        /* В одинарных кавычках обратная косая черта остаётся обычным символом. */
         if (ch == '\\' && quote != '\'') {
             if (p[1] == '\0') {
                 *error = "Обратная косая черта в конце строки";
                 return ERROR;
             }
 
+            /* В двойных кавычках экранируется только этот набор символов. */
             if (quote == '\0' || strchr("$`\"\\", p[1])) {
                 ch = *++p;
             }
@@ -98,6 +101,7 @@ static enum token nextword(char **line, char **buffer, char *end, char **word, c
 }
 
 int parseline(char **line) {
+    /* Указатели в cmds и имена файлов действуют до следующего вызова разбора. */
     static char buffer[2 * MAX_LINE];
     char *p = buffer;
     char *word = NULL;
@@ -114,6 +118,7 @@ int parseline(char **line) {
             goto error;
         }
         if (type == SEMICOLON || type == BACKGROUND) {
+            /* Оставшуюся часть строки разберёт следующий вызов из main. */
             if (cmds[i].argc == 0) {
                 goto error;
             }
@@ -153,6 +158,7 @@ int parseline(char **line) {
                 }
             }
         } else {
+            /* Последний элемент массива резервируется для завершающего NULL. */
             if (cmds[i].argc == MAX_ARGS - 1) {
                 goto error;
             }
