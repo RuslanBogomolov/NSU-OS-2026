@@ -655,7 +655,7 @@ int main(void) {
     }
     while (!quit) {
         collect_jobs();
-        int result = prompline(line, sizeof(line));
+        int result = promptline(line, sizeof(line));
         if (result == 0 || result == -2) {
             input_error = result == -2;
             break;

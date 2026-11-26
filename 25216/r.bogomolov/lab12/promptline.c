@@ -60,7 +60,7 @@ static int read_character(char *ch) {
     }
 }
 
-int prompline(char *line, int size) {
+int promptline(char *line, int size) {
     int used = 0;
     int too_long = 0;
     char ch;

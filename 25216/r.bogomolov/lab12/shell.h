@@ -24,7 +24,7 @@ extern volatile sig_atomic_t input_interrupted;
 int collect_jobs(void);
 
 /* 1 — строка, 0 — EOF, -1 — переполнение, -2 — ошибка ввода, -3 — Ctrl+C. */
-int prompline(char *line, int size);
+int promptline(char *line, int size);
 
 /* Разбирает один конвейер и сдвигает *line; возвращает число команд или -1. */
 int parseline(char **line);
